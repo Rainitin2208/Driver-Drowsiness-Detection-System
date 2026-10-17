@@ -240,13 +240,8 @@ class DrowsinessDetector:
                         ys = [p[1] for p in all_pts]
                         min_x, max_x = max(10, min(xs) - 40), min(img_w - 10, max(xs) + 40)
                         min_y, max_y = max(10, min(ys) - 60), min(img_h - 10, max(ys) + 60)
-                        cv2.rectangle(annotated_frame, (min_x, min_y), (max_x, max_y), (16, 185, 129), 2)
-                        
-                        status_str = "Face Found"
-                        if self.is_yawning:
-                            status_str += " | YAWN DETECTED!"
-                        cv2.putText(annotated_frame, status_str, (min_x, min_y - 10),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255) if self.is_yawning else (16, 185, 129), 2)
+                        box_color = (0, 0, 255) if self.is_drowsy else ((0, 165, 255) if self.is_yawning else (16, 185, 129))
+                        cv2.rectangle(annotated_frame, (min_x, min_y), (max_x, max_y), box_color, 2)
 
                     
                     if self.current_ear < self.ear_threshold:
@@ -285,8 +280,51 @@ class DrowsinessDetector:
                 
                 self.fused_score = self.compute_fused_score()
                 self.fatigue_history.append((elapsed, self.fused_score))
+
+                # Render Real-Time HUD on Frame
+                # 1. Top Status Banner
+                if self.is_drowsy:
+                    cv2.rectangle(annotated_frame, (0, 0), (img_w, 42), (0, 0, 220), -1)
+                    cv2.putText(annotated_frame, f"*** ALERT: DROWSINESS DETECTED! WAKE UP! (EAR: {self.current_ear:.2f}) ***",
+                                (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (255, 255, 255), 2)
+                elif self.is_yawning:
+                    cv2.rectangle(annotated_frame, (0, 0), (img_w, 42), (0, 140, 255), -1)
+                    cv2.putText(annotated_frame, f"WARNING: YAWNING DETECTED (MAR: {self.current_mar:.2f})",
+                                (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (255, 255, 255), 2)
+                else:
+                    cv2.rectangle(annotated_frame, (0, 0), (img_w, 36), (15, 120, 20), -1)
+                    cv2.putText(annotated_frame, f"DRIVER AWAKE & ATTENTIVE | EAR: {self.current_ear:.2f}",
+                                (15, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (255, 255, 255), 2)
+
+                # 2. Bottom-Left Live Telemetry Overlay Box
+                box_h = 105
+                overlay = annotated_frame.copy()
+                cv2.rectangle(overlay, (10, img_h - box_h - 10), (340, img_h - 10), (10, 15, 25), -1)
+                cv2.addWeighted(overlay, 0.7, annotated_frame, 0.3, 0, annotated_frame)
+                cv2.rectangle(annotated_frame, (10, img_h - box_h - 10), (340, img_h - 10), (0, 180, 216), 1)
+
+                eye_state = "CLOSED (ALERT!)" if self.current_ear < self.ear_threshold else "OPEN"
+                eye_color = (0, 0, 255) if self.current_ear < self.ear_threshold else (0, 255, 0)
+                cv2.putText(annotated_frame, f"EAR: {self.current_ear:.3f} (Limit: {self.ear_threshold:.2f})",
+                            (20, img_h - box_h + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1)
+                cv2.putText(annotated_frame, f"Eyes: {eye_state}",
+                            (20, img_h - box_h + 36), cv2.FONT_HERSHEY_SIMPLEX, 0.48, eye_color, 1)
+                cv2.putText(annotated_frame, f"MAR: {self.current_mar:.3f} | Yawns: {self.yawn_count}",
+                            (20, img_h - box_h + 58), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1)
+                cv2.putText(annotated_frame, f"Head Pose: Pitch {self.pitch:+.1f} deg | Yaw {self.yaw:+.1f} deg",
+                            (20, img_h - box_h + 80), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1)
+                cv2.putText(annotated_frame, f"Fatigue Risk: {int(self.fused_score * 100)}% | Blinks: {self.blink_count}",
+                            (20, img_h - box_h + 100), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 255, 255), 1)
             else:
                 self.face_detected = False
+                # Visual guide when face is searching
+                cv2.rectangle(annotated_frame, (0, 0), (img_w, 40), (0, 140, 255), -1)
+                cv2.putText(annotated_frame, "SEARCHING FOR FACE... PLEASE LOOK TOWARDS CAMERA",
+                            (15, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 255, 255), 2)
+                center_x, center_y = img_w // 2, img_h // 2
+                cv2.ellipse(annotated_frame, (center_x, center_y), (int(img_w * 0.22), int(img_h * 0.35)), 0, 0, 360, (0, 180, 216), 2)
+                cv2.putText(annotated_frame, "Align Face Here", (center_x - 70, center_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 180, 216), 2)
                 
         return annotated_frame
 

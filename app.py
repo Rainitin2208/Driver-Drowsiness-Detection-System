@@ -348,11 +348,11 @@ def main():
         edge_screen = st.sidebar.selectbox(
             "Select Screen Module",
             [
+                "6.2 Live Monitoring Screen",
+                "6.1 Camera & Driver Calibration",
                 "3. Splash Screen",
                 "4.1 Driver Login",
                 "4.2 Forgot Password",
-                "6.1 Camera & Driver Calibration",
-                "6.2 Live Monitoring Screen",
                 "6.3 Basic Drowsiness Alert",
                 "7.1 Wearable Pairing",
                 "7.2 Yawning & Head-Pose Monitoring",
@@ -366,7 +366,8 @@ def main():
                 "11.4 Report Issue / Help",
                 "11.5 Terms of Use",
                 "11.6 Logout Confirmation"
-            ]
+            ],
+            index=0
         )
         
         st.sidebar.markdown("---")
@@ -629,49 +630,87 @@ def render_forgot_password():
 
 def render_calibration_screen():
     render_edge_header("Camera & Driver Calibration")
+    detector = st.session_state.detector
     
     col_cam, col_calib = st.columns([3, 2])
     
     with col_cam:
-        st.markdown(
+        cam_calib_ph = st.empty()
+        cam_calib_ph.markdown(
             """
-            <div style="position: relative; background: #000; border-radius: 12px; overflow: hidden; border: 2px solid #10B981; height: 380px; display: flex; align-items: center; justify-content: center;">
-                <div style="position: absolute; top: 15px; left: 15px; color: #EF4444; font-weight: 700;">● LIVE</div>
-                <div style="position: absolute; top: 15px; right: 15px; color: #10B981; font-weight: 700;">Face Found</div>
-                <!-- Mock Face Calibration Oval -->
-                <div style="border: 3px solid #10B981; width: 180px; height: 230px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(16, 185, 129, 0.05);">
-                    <div style="font-size: 3rem;">👤</div>
-                </div>
+            <div style="position: relative; background: #000; border-radius: 12px; overflow: hidden; border: 2px solid #10B981; height: 380px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px;">
+                <div style="font-size: 3.5rem; margin-bottom: 10px;">👤</div>
+                <h4 style="color: #FFFFFF; margin: 0;">Camera Calibration Standby</h4>
+                <p style="color: #94A3B8; font-size: 0.85rem; max-width: 320px; margin-top: 6px;">
+                    Look directly at the webcam with open eyes, then click "Start Live Calibration" to measure and record your personalized baseline Eye Aspect Ratio (EAR).
+                </p>
             </div>
             """,
             unsafe_allow_html=True
         )
         
     with col_calib:
-        st.markdown(
-            """
+        calib_info_ph = st.empty()
+        baseline_display_val = st.session_state.current_driver.get("baseline_ear", 0.31)
+        
+        calib_info_ph.markdown(
+            f"""
             <div class="edge-card">
-                <h3 style="color: #FFFFFF; margin-top: 0;">Calibration</h3>
-                <div style="color: #10B981; font-weight: 700; margin-bottom: 8px;">🟢 Face Found</div>
-                <div style="color: #10B981; font-weight: 700; margin-bottom: 8px;">🟢 Eyes Detected</div>
-                <div style="color: #F59E0B; font-weight: 700; margin-bottom: 8px;">🟠 Baseline EAR captured</div>
-                <div style="color: #10B981; font-weight: 700; margin-bottom: 16px;">🟢 Lighting OK</div>
+                <h3 style="color: #FFFFFF; margin-top: 0;">Calibration Setup</h3>
+                <div style="color: #10B981; font-weight: 700; margin-bottom: 8px;">🟢 Camera: Ready (OpenCV)</div>
+                <div style="color: #10B981; font-weight: 700; margin-bottom: 8px;">🟢 Status: {st.session_state.current_driver.get('calibration_status', 'Pending')}</div>
+                <div style="color: #F59E0B; font-weight: 700; margin-bottom: 16px;">🟠 Baseline EAR: {baseline_display_val:.2f}</div>
                 
-                <div style="color: #94A3B8; font-size: 0.85rem; text-transform: uppercase;">Baseline EAR</div>
-                <div style="font-size: 2.8rem; font-weight: 900; color: #00B4D8;">0.31</div>
-                
-                <div style="color: #94A3B8; font-size: 0.85rem; margin-top: 10px;">Calibrating... 65%</div>
-                <div style="background-color: #0B132B; border-radius: 8px; height: 10px; margin-bottom: 20px;">
-                    <div style="background-color: #00B4D8; width: 65%; height: 100%; border-radius: 8px;"></div>
-                </div>
+                <div style="color: #94A3B8; font-size: 0.85rem; text-transform: uppercase;">Active Baseline EAR</div>
+                <div style="font-size: 2.8rem; font-weight: 900; color: #00B4D8;">{baseline_display_val:.2f}</div>
+                <div style="color: #94A3B8; font-size: 0.8rem; margin-top: 4px;">Drowsiness Threshold (75%): {round(baseline_display_val * 0.75, 2):.2f}</div>
             </div>
             """,
             unsafe_allow_html=True
         )
         
-        st.button("Start Calibration", type="primary", use_container_width=True)
-        st.button("Skip (use last calibration)", use_container_width=True)
-        
+        if st.button("Start Live Calibration", type="primary", use_container_width=True):
+            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            if not cap.isOpened():
+                cap = cv2.VideoCapture(0)
+                
+            if cap.isOpened():
+                progress_bar = st.progress(0, text="Calibrating eyes... please look at camera")
+                collected_ears = []
+                frame_idx = 0
+                total_frames = 25
+                
+                while frame_idx < total_frames and cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret:
+                        continue
+                    annotated = detector.process_frame(frame)
+                    frame_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+                    cam_calib_ph.image(frame_rgb, channels="RGB", use_container_width=True)
+                    
+                    if detector.face_detected and detector.current_ear > 0.05:
+                        collected_ears.append(detector.current_ear)
+                        frame_idx += 1
+                        progress_bar.progress(int((frame_idx / total_frames) * 100), text=f"Calibrating... {frame_idx}/{total_frames} frames")
+                    time.sleep(0.04)
+                    
+                cap.release()
+                if collected_ears:
+                    avg_ear = round(float(np.mean(collected_ears)), 3)
+                    calc_thresh = round(avg_ear * 0.75, 2)
+                    detector.ear_threshold = calc_thresh
+                    st.session_state.current_driver["baseline_ear"] = avg_ear
+                    st.session_state.current_driver["calibration_status"] = "Completed"
+                    st.success(f"Calibration Completed! Baseline EAR: {avg_ear:.3f}. Threshold set to {calc_thresh:.2f}")
+                    st.rerun()
+                else:
+                    st.warning("Could not detect face clearly during calibration. Please ensure good lighting and look directly at camera.")
+            else:
+                st.error("Hardware Camera (OpenCV Device 0) not accessible. Please check your camera connection or close other apps using it.")
+                
+        if st.button("Skip (use last calibration)", use_container_width=True):
+            st.info("Using saved default calibration.")
+            
     render_edge_footer()
 
 def render_live_monitoring():
@@ -681,10 +720,14 @@ def render_live_monitoring():
     col_left, col_right = st.columns([3, 3])
     
     with col_left:
-        st.markdown("#### 📹 Live Video Stream")
+        st.markdown("#### 📹 Live Video Stream & Vision Engine")
         
         # Camera Mode Selector
-        cam_source = st.radio("Camera Feed Source", ["🌐 WebRTC Browser Camera", "📹 Direct OpenCV Webcam"], horizontal=True)
+        cam_source = st.radio(
+            "Camera Feed Source", 
+            ["📹 Direct OpenCV Webcam (Fast & Real-time)", "🌐 WebRTC Browser Camera"], 
+            horizontal=True
+        )
         
         if cam_source == "🌐 WebRTC Browser Camera":
             from detector import DrowsinessVideoProcessor
@@ -699,59 +742,61 @@ def render_live_monitoring():
                 media_stream_constraints={"video": True, "audio": False},
                 async_processing=True,
             )
+            st.caption("ℹ️ Click 'START' in the box above to stream directly from your browser.")
+            frame_placeholder = None
+            cam_device_idx = 0
+            is_active_cam = False
         else: # Direct OpenCV Webcam
-            st.info("Capturing live video feed directly from system webcam (OpenCV VideoCapture)...")
-            frame_placeholder = st.empty()
-            col_start, col_stop = st.columns(2)
-            with col_start:
-                start_btn = st.button("Start Live OpenCV Stream", type="primary", use_container_width=True)
-            with col_stop:
-                stop_btn = st.button("Stop Stream", use_container_width=True)
+            c_dev, c_tgl = st.columns([1, 2])
+            with c_dev:
+                cam_device_idx = st.selectbox("Camera Device", [0, 1, 2], index=0, format_func=lambda x: f"Device {x}")
+            with c_tgl:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                is_active_cam = st.toggle("🟢 Turn ON Live OpenCV Stream", value=st.session_state.get("cam_toggle_state", False), key="cam_toggle_state")
                 
-            if start_btn:
-                cap = cv2.VideoCapture(0)
-                if cap.isOpened():
-                    st.success("OpenCV Camera Feed Active! Streaming in real-time...")
-                    while cap.isOpened() and not stop_btn:
-                        ret, frame = cap.read()
-                        if not ret:
-                            st.warning("Failed to grab camera frame.")
-                            break
-                        annotated = detector.process_frame(frame)
-                        frame_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
-                        frame_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
-                        time.sleep(0.01)
-                    cap.release()
-                else:
-                    st.error("Hardware Camera (OpenCV Index 0) not accessible or currently in use by another app.")
-
-
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown(
-            f"""
-            <div class="edge-card">
-                <div style="color: #94A3B8; font-size: 0.85rem; text-transform: uppercase;">Fatigue Score (fused)</div>
-                <div style="background-color: #0B132B; border-radius: 8px; height: 14px; margin: 8px 0;">
-                    <div style="background-color: #10B981; width: {int(detector.fused_score * 100)}%; height: 100%; border-radius: 8px;"></div>
-                </div>
-                <div style="font-size: 1.1rem; font-weight: 800; color: #10B981;">
-                    {detector.fused_score} • Low risk
-                </div>
-                <div style="color: #94A3B8; font-size: 0.8rem; margin-top: 4px;">
-                    Signals: Eye ✓ &nbsp; Yawn ✓ &nbsp; Head ✓ &nbsp; HR ✓ &nbsp; Steering ✓
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+            frame_placeholder = st.empty()
+            
+        fatigue_placeholder = st.empty()
 
     with col_right:
-        # Top Driver Status Card
+        status_placeholder = st.empty()
+        metrics_placeholder = st.empty()
+        
+        # Action Buttons
+        b1, b2, b3 = st.columns([1, 1, 1])
+        with b1:
+            if st.button("Start Trip", type="primary", use_container_width=True):
+                detector.trip_active = True
+                detector.session_start_time = time.time()
+                st.success("Trip Started!")
+        with b2:
+            if st.button("End Trip", use_container_width=True):
+                detector.trip_active = False
+                st.info("Trip Concluded.")
+        with b3:
+            mute_label = "Unmute Chime" if detector.muted_chime else "Mute Chime"
+            if st.button(mute_label, use_container_width=True):
+                detector.muted_chime = not detector.muted_chime
+                st.rerun()
+            
+        recent_events_placeholder = st.empty()
+
+    # Function to update all metric cards simultaneously
+    def _update_ui_cards():
         status_class = "status-alert" if not detector.is_drowsy else "status-drowsy"
         status_text = "ALERT" if not detector.is_drowsy else "DROWSY"
+        status_tag_bg = "rgba(16, 185, 129, 0.2)" if not detector.is_drowsy else "rgba(239, 68, 68, 0.2)"
+        status_tag_color = "#10B981" if not detector.is_drowsy else "#EF4444"
+        status_tag_border = "#10B981" if not detector.is_drowsy else "#EF4444"
+        status_tag_text = "Attentive & Active" if not detector.is_drowsy else "DROWSINESS DETECTED!"
         
-        st.markdown(
+        elapsed_trip_s = int(time.time() - detector.session_start_time)
+        hrs = elapsed_trip_s // 3600
+        mins = (elapsed_trip_s % 3600) // 60
+        secs = elapsed_trip_s % 60
+        trip_time_str = f"Trip {hrs:02d}:{mins:02d}:{secs:02d}"
+
+        status_placeholder.markdown(
             f"""
             <div class="edge-card" style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
@@ -759,51 +804,141 @@ def render_live_monitoring():
                     <div class="{status_class}" style="display: inline-block; margin-top: 4px;">{status_text}</div>
                 </div>
                 <div style="text-align: right;">
-                    <div style="background: #0B132B; padding: 6px 12px; border-radius: 20px; font-weight: 700; color: #E2E8F0; font-size: 0.9rem;">Trip 00:42:18</div>
-                    <div style="background: rgba(16, 185, 129, 0.2); color: #10B981; border: 1px solid #10B981; padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; margin-top: 8px; display: inline-block;">Calibrated</div>
+                    <div style="background: #0B132B; padding: 6px 12px; border-radius: 20px; font-weight: 700; color: #E2E8F0; font-size: 0.9rem;">{trip_time_str}</div>
+                    <div style="background: {status_tag_bg}; color: {status_tag_color}; border: 1px solid {status_tag_border}; padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; margin-top: 8px; display: inline-block;">{status_tag_text}</div>
                 </div>
             </div>
             """,
             unsafe_allow_html=True
         )
-        
-        # 6 Telemetry Metric Cards Grid
-        m1, m2, m3 = st.columns(3)
-        with m1:
-            st.markdown(f"""<div class="edge-card"><div class="edge-metric-label">EAR</div><div class="edge-metric-val">{detector.current_ear}</div></div>""", unsafe_allow_html=True)
-        with m2:
-            st.markdown(f"""<div class="edge-card"><div class="edge-metric-label">Blink rate</div><div class="edge-metric-val">{detector.blink_count}<span style="font-size:0.9rem; font-weight:400;">/min</span></div></div>""", unsafe_allow_html=True)
-        with m3:
-            st.markdown(f"""<div class="edge-card"><div class="edge-metric-label">Eye closure</div><div class="edge-metric-val">0.2<span style="font-size:0.9rem; font-weight:400;"> s</span></div></div>""", unsafe_allow_html=True)
-            
-        m4, m5, m6 = st.columns(3)
-        with m4:
-            st.markdown(f"""<div class="edge-card"><div class="edge-metric-label">Yawns</div><div class="edge-metric-val">{detector.yawn_count}</div></div>""", unsafe_allow_html=True)
-        with m5:
-            st.markdown(f"""<div class="edge-card"><div class="edge-metric-label">Head pose</div><div class="edge-metric-val">{abs(int(detector.pitch))}°</div></div>""", unsafe_allow_html=True)
-        with m6:
-            st.markdown(f"""<div class="edge-card"><div class="edge-metric-label">Heart rate</div><div class="edge-metric-val">{detector.heart_rate}<span style="font-size:0.9rem; font-weight:400;">bpm</span></div></div>""", unsafe_allow_html=True)
 
-        # Action Buttons
-        b1, b2, b3 = st.columns([1, 1, 1])
-        with b1:
-            st.button("Start Trip", type="primary", use_container_width=True)
-        with b2:
-            st.button("End Trip", use_container_width=True)
-        with b3:
-            st.button("Mute Chime", use_container_width=True)
-            
-        # Recent Events Box
-        st.markdown(
-            """
-            <div class="edge-card">
-                <div style="color: #94A3B8; font-size: 0.85rem; font-weight: 700; margin-bottom: 8px;">Recent events</div>
-                <div style="font-size: 0.85rem; color: #CBD5E1; margin-bottom: 4px;">10:31 Yawn detected</div>
-                <div style="font-size: 0.85rem; color: #CBD5E1;">10:12 Blink rate low — Warning cleared</div>
+        ear_color = "#EF4444" if detector.current_ear < detector.ear_threshold else "#10B981"
+        mar_color = "#F59E0B" if detector.is_yawning else "#00B4D8"
+        face_status = "Detected ✓" if detector.face_detected else "Searching..."
+
+        metrics_placeholder.markdown(
+            f"""
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin: 12px 0;">
+                <div class="edge-card">
+                    <div class="edge-metric-label">EAR (Eye Ratio)</div>
+                    <div class="edge-metric-val" style="color: {ear_color};">{detector.current_ear:.3f}</div>
+                    <div style="font-size: 0.72rem; color: #94A3B8;">Thresh: {detector.ear_threshold:.2f} ({'CLOSED' if detector.current_ear < detector.ear_threshold else 'OPEN'})</div>
+                </div>
+                <div class="edge-card">
+                    <div class="edge-metric-label">Blink rate</div>
+                    <div class="edge-metric-val">{detector.blink_count}<span style="font-size:0.85rem; font-weight:400;"> blinks</span></div>
+                    <div style="font-size: 0.72rem; color: #94A3B8;">Face: {face_status}</div>
+                </div>
+                <div class="edge-card">
+                    <div class="edge-metric-label">Alert Stage</div>
+                    <div class="edge-metric-val" style="color: {'#EF4444' if detector.alert_stage > 0 else '#10B981'};">Stage {detector.alert_stage}</div>
+                    <div style="font-size: 0.72rem; color: #94A3B8;">Alerts: {detector.total_alerts}</div>
+                </div>
+                <div class="edge-card">
+                    <div class="edge-metric-label">Yawns (MAR)</div>
+                    <div class="edge-metric-val" style="color: {mar_color};">{detector.yawn_count}</div>
+                    <div style="font-size: 0.72rem; color: #94A3B8;">MAR: {detector.current_mar:.2f} (Limit {detector.yawn_mar_threshold:.2f})</div>
+                </div>
+                <div class="edge-card">
+                    <div class="edge-metric-label">Head Pose Tilt</div>
+                    <div class="edge-metric-val">{abs(int(detector.pitch))}°</div>
+                    <div style="font-size: 0.72rem; color: #94A3B8;">Pitch {detector.pitch:+.0f}° | Yaw {detector.yaw:+.0f}°</div>
+                </div>
+                <div class="edge-card">
+                    <div class="edge-metric-label">Heart rate</div>
+                    <div class="edge-metric-val">{detector.heart_rate}<span style="font-size:0.85rem; font-weight:400;"> bpm</span></div>
+                    <div style="font-size: 0.72rem; color: #94A3B8;">HRV: {detector.hrv} ms</div>
+                </div>
             </div>
             """,
             unsafe_allow_html=True
         )
+
+        score_pct = int(detector.fused_score * 100)
+        score_color = "#10B981" if detector.fused_score < 0.4 else ("#F59E0B" if detector.fused_score < 0.7 else "#EF4444")
+        risk_text = "Low risk" if detector.fused_score < 0.4 else ("Moderate risk" if detector.fused_score < 0.7 else "CRITICAL DROWSINESS RISK")
+
+        fatigue_placeholder.markdown(
+            f"""
+            <div class="edge-card">
+                <div style="color: #94A3B8; font-size: 0.85rem; text-transform: uppercase;">Fatigue Score (fused)</div>
+                <div style="background-color: #0B132B; border-radius: 8px; height: 14px; margin: 8px 0;">
+                    <div style="background-color: {score_color}; width: {min(100, score_pct)}%; height: 100%; border-radius: 8px; transition: width 0.3s ease;"></div>
+                </div>
+                <div style="font-size: 1.1rem; font-weight: 800; color: {score_color};">
+                    {detector.fused_score} • {risk_text}
+                </div>
+                <div style="color: #94A3B8; font-size: 0.8rem; margin-top: 4px;">
+                    Signals: Eye {'✓' if detector.current_ear >= detector.ear_threshold else '⚠'} &nbsp; Yawn {'✓' if not detector.is_yawning else '⚠'} &nbsp; Head ✓ &nbsp; HR ✓ &nbsp; Steering ✓
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        recent_events_placeholder.markdown(
+            f"""
+            <div class="edge-card" style="margin-top: 10px;">
+                <div style="color: #94A3B8; font-size: 0.85rem; font-weight: 700; margin-bottom: 8px;">Recent events</div>
+                <div style="font-size: 0.85rem; color: #CBD5E1; margin-bottom: 4px;">{'⚠️ Drowsiness event detected!' if detector.is_drowsy else ('⚠️ Yawn detected!' if detector.is_yawning else '✓ Driver attentive — No active events')}</div>
+                <div style="font-size: 0.85rem; color: #94A3B8;">Total drowsiness alerts this trip: {detector.total_alerts}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    # Initial static render of cards
+    _update_ui_cards()
+
+    # OpenCV Live Camera Stream Execution
+    if cam_source != "🌐 WebRTC Browser Camera" and frame_placeholder is not None:
+        if is_active_cam:
+            cap = cv2.VideoCapture(cam_device_idx, cv2.CAP_DSHOW)
+            if not cap.isOpened():
+                cap = cv2.VideoCapture(cam_device_idx)
+            
+            if cap.isOpened():
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                st.toast(f"OpenCV Camera (Device {cam_device_idx}) connected!", icon="📹")
+                
+                try:
+                    while st.session_state.get("cam_toggle_state", False):
+                        ret, frame = cap.read()
+                        if not ret:
+                            frame_placeholder.warning("Waiting for webcam frame...")
+                            time.sleep(0.05)
+                            continue
+                        
+                        annotated = detector.process_frame(frame)
+                        frame_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+                        frame_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
+                        
+                        _update_ui_cards()
+                        time.sleep(0.01)
+                finally:
+                    cap.release()
+            else:
+                frame_placeholder.error(
+                    f"❌ Hardware Camera (OpenCV Device Index {cam_device_idx}) could not be opened.\n\n"
+                    "💡 Tips to resolve:\n"
+                    "1. Try selecting a different Camera Device (e.g. Device 1 or 2) from the dropdown above.\n"
+                    "2. Make sure no other application (Zoom, Teams, Camera app, or another browser tab) is using your webcam.\n"
+                    "3. Check Windows Camera Privacy Settings (Settings > Privacy & security > Camera > 'Let desktop apps access your camera')."
+                )
+        else:
+            frame_placeholder.markdown(
+                """
+                <div style="background: #0B132B; border: 2px dashed #334155; border-radius: 12px; height: 350px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px;">
+                    <div style="font-size: 3.5rem; margin-bottom: 10px;">📹</div>
+                    <h4 style="color: #FFFFFF; margin: 0 0 8px 0;">OpenCV Camera is in Standby</h4>
+                    <p style="color: #94A3B8; font-size: 0.9rem; max-width: 400px; margin: 0;">
+                        Switch the toggle <strong>'🟢 Turn ON Live OpenCV Stream'</strong> above to begin real-time eye tracking, yawn detection, and drowsiness monitoring.
+                    </p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
     render_edge_footer()
 
@@ -913,13 +1048,16 @@ def render_yawn_headpose_monitoring():
     col_cam, col_metrics = st.columns([3, 2])
     with col_cam:
         st.markdown(
-            """
-            <div style="position: relative; background: #000; border-radius: 12px; overflow: hidden; border: 2px solid #00B4D8; height: 350px; display: flex; align-items: center; justify-content: center;">
-                <div style="position: absolute; top: 15px; left: 15px; color: #EF4444; font-weight: 700;">● LIVE</div>
-                <div style="position: absolute; top: 15px; right: 15px; color: #10B981; font-weight: 700;">Tracking</div>
+            f"""
+            <div style="position: relative; background: #000; border-radius: 12px; overflow: hidden; border: 2px solid #00B4D8; height: 350px; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                <div style="position: absolute; top: 15px; left: 15px; color: {'#10B981' if detector.face_detected else '#EF4444'}; font-weight: 700;">● {'TRACKING ACTIVE' if detector.face_detected else 'SEARCHING FACE'}</div>
+                <div style="position: absolute; top: 15px; right: 15px; color: #10B981; font-weight: 700;">Face Mesh</div>
                 <div style="text-align: center;">
                     <div style="font-size: 4rem;">👤</div>
-                    <div style="color: #F59E0B; font-weight: 700; margin-top: 10px;">MAR 0.62</div>
+                    <div style="color: {'#F59E0B' if detector.is_yawning else '#10B981'}; font-weight: 700; margin-top: 10px; font-size: 1.3rem;">
+                        MAR {detector.current_mar:.2f} ({'YAWN DETECTED!' if detector.is_yawning else 'Normal'})
+                    </div>
+                    <div style="color: #94A3B8; font-size: 0.85rem; margin-top: 4px;">Limit Threshold: {detector.yawn_mar_threshold:.2f}</div>
                 </div>
             </div>
             """,
@@ -929,44 +1067,51 @@ def render_yawn_headpose_monitoring():
     with col_metrics:
         c1, c2 = st.columns(2)
         with c1:
+            yawn_status = "WARNING" if detector.yawn_count >= 3 else ("NORMAL" if detector.yawn_count == 0 else "CAUTION")
+            yawn_color = "#EF4444" if detector.yawn_count >= 3 else ("#10B981" if detector.yawn_count == 0 else "#F59E0B")
             st.markdown(
-                """
+                f"""
                 <div class="edge-card">
                     <div style="color: #94A3B8; font-size: 0.8rem;">Yawn count (trip)</div>
-                    <div style="font-size: 3rem; font-weight: 900; color: #F59E0B;">3</div>
+                    <div style="font-size: 3rem; font-weight: 900; color: {yawn_color};">{detector.yawn_count}</div>
                     <div style="font-size: 0.75rem; color: #94A3B8;">Limit: 3 in 10 min</div>
-                    <div style="background: rgba(245, 158, 11, 0.2); color: #F59E0B; padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 0.75rem; display: inline-block; margin-top: 4px;">WARNING</div>
+                    <div style="background: rgba(245, 158, 11, 0.2); color: {yawn_color}; padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 0.75rem; display: inline-block; margin-top: 4px;">{yawn_status}</div>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
         with c2:
             st.markdown(
-                """
+                f"""
                 <div class="edge-card">
                     <div style="color: #94A3B8; font-size: 0.8rem; margin-bottom: 4px;">Head pose</div>
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 2px;"><span style="color:#94A3B8;">Pitch</span> <strong>18°</strong></div>
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 2px;"><span style="color:#94A3B8;">Yaw</span> <strong>5°</strong></div>
-                    <div style="display: flex; justify-content: space-between;"><span style="color:#94A3B8;">Roll</span> <strong>3°</strong></div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 2px;"><span style="color:#94A3B8;">Pitch</span> <strong>{detector.pitch:+.0f}°</strong></div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 2px;"><span style="color:#94A3B8;">Yaw</span> <strong>{detector.yaw:+.0f}°</strong></div>
+                    <div style="display: flex; justify-content: space-between;"><span style="color:#94A3B8;">Roll</span> <strong>{detector.roll:+.0f}°</strong></div>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
             
-        st.markdown("<div class='edge-card'><div style='color:#94A3B8; font-size:0.8rem;'>Head pitch over time (degrees)</div></div>", unsafe_allow_html=True)
-        x_pitch = np.linspace(0, 10, 20)
-        y_pitch = [10, 11, 12, 14, 16, 18, 20, 22, 21]
-        fig_p = px.line(x=x_pitch[:len(y_pitch)], y=y_pitch)
+        st.markdown("<div class='edge-card'><div style='color:#94A3B8; font-size:0.8rem;'>Head pitch trend (degrees)</div></div>", unsafe_allow_html=True)
+        if len(detector.pitch_history) > 1:
+            xs = [p[0] for p in detector.pitch_history]
+            ys = [p[1] for p in detector.pitch_history]
+        else:
+            xs = [0, 1, 2]
+            ys = [detector.pitch, detector.pitch, detector.pitch]
+        fig_p = px.line(x=xs, y=ys)
         fig_p.update_traces(line_color='#F59E0B', line_width=3)
         fig_p.update_layout(height=100, margin=dict(l=0, r=0, t=0, b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig_p, use_container_width=True)
 
+    yawn_reach = "WARNING (yawns limit reached)" if detector.yawn_count >= 3 else "NORMAL (within limits)"
     st.markdown(
-        """
+        f"""
         <div class="edge-card">
-            <div style="font-weight: 700; color: #FFFFFF;">Thresholds</div>
+            <div style="font-weight: 700; color: #FFFFFF;">Thresholds & Active Telemetry</div>
             <div style="color: #CBD5E1; font-size: 0.9rem; margin-top: 4px;">
-                Yawn: 3 in 10 min &nbsp;|&nbsp; Head tilt: 25° for 3 s &nbsp;|&nbsp; Status: <strong style="color: #F59E0B;">WARNING (yawns reached limit)</strong>
+                Yawn: 3 in 10 min &nbsp;|&nbsp; Head tilt threshold: 25° for 3 s &nbsp;|&nbsp; Current Status: <strong style="color: {'#EF4444' if detector.yawn_count >= 3 else '#10B981'};">{yawn_reach}</strong>
             </div>
         </div>
         """,
@@ -986,7 +1131,7 @@ def render_fused_fatigue_score():
         # Semi-circular Gauge Chart using Plotly
         fig_gauge = go.Figure(go.Indicator(
             mode = "gauge+number",
-            value = 0.58,
+            value = float(detector.fused_score),
             title = {'text': "Fatigue Score", 'font': {'color': '#94A3B8', 'size': 16}},
             number = {'font': {'color': '#FFFFFF', 'size': 44, 'family': 'Segoe UI'}},
             gauge = {
@@ -1006,49 +1151,55 @@ def render_fused_fatigue_score():
         st.markdown("</div>", unsafe_allow_html=True)
 
     with c2:
+        ear_score = max(0.0, min(1.0, (0.32 - detector.current_ear) / 0.15)) if detector.current_ear < 0.32 else 0.05
+        yawn_score = min(1.0, detector.yawn_count / 4.0)
+        head_score = min(1.0, abs(detector.pitch) / 30.0)
+        hr_score = max(0.0, min(1.0, (75 - detector.heart_rate) / 25.0)) if detector.wearable_connected else 0.0
+        
         st.markdown(
-            """
+            f"""
             <div class="edge-card">
                 <h3 style="color: #FFFFFF; margin-top: 0;">Signal contribution</h3>
                 
                 <div style="margin-bottom: 12px;">
                     <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #CBD5E1; margin-bottom: 4px;">
-                        <span>Eye closure (EAR) (weight 35%)</span><strong>0.62</strong>
+                        <span>Eye closure (EAR: {detector.current_ear:.2f}) (weight 35%)</span><strong>{ear_score:.2f}</strong>
                     </div>
-                    <div style="background:#0B132B; border-radius:6px; height:8px;"><div style="background:#F59E0B; width:62%; height:100%; border-radius:6px;"></div></div>
+                    <div style="background:#0B132B; border-radius:6px; height:8px;"><div style="background:{'#EF4444' if ear_score > 0.5 else '#10B981'}; width:{int(ear_score * 100)}%; height:100%; border-radius:6px;"></div></div>
                 </div>
                 
                 <div style="margin-bottom: 12px;">
                     <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #CBD5E1; margin-bottom: 4px;">
-                        <span>Yawning (weight 15%)</span><strong>0.70</strong>
+                        <span>Yawning (Yawns: {detector.yawn_count}) (weight 15%)</span><strong>{yawn_score:.2f}</strong>
                     </div>
-                    <div style="background:#0B132B; border-radius:6px; height:8px;"><div style="background:#F59E0B; width:70%; height:100%; border-radius:6px;"></div></div>
+                    <div style="background:#0B132B; border-radius:6px; height:8px;"><div style="background:{'#F59E0B' if yawn_score > 0.3 else '#10B981'}; width:{int(yawn_score * 100)}%; height:100%; border-radius:6px;"></div></div>
                 </div>
                 
                 <div style="margin-bottom: 12px;">
                     <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #CBD5E1; margin-bottom: 4px;">
-                        <span>Head pose (weight 15%)</span><strong>0.40</strong>
+                        <span>Head pose (Pitch: {detector.pitch:+.0f}°) (weight 15%)</span><strong>{head_score:.2f}</strong>
                     </div>
-                    <div style="background:#0B132B; border-radius:6px; height:8px;"><div style="background:#10B981; width:40%; height:100%; border-radius:6px;"></div></div>
+                    <div style="background:#0B132B; border-radius:6px; height:8px;"><div style="background:{'#EF4444' if head_score > 0.6 else '#10B981'}; width:{int(head_score * 100)}%; height:100%; border-radius:6px;"></div></div>
                 </div>
                 
                 <div style="margin-bottom: 12px;">
                     <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #CBD5E1; margin-bottom: 4px;">
-                        <span>Heart rate / HRV (weight 20%)</span><strong>0.55</strong>
+                        <span>Heart rate / HRV ({detector.heart_rate} bpm) (weight 20%)</span><strong>{hr_score:.2f}</strong>
                     </div>
-                    <div style="background:#0B132B; border-radius:6px; height:8px;"><div style="background:#F59E0B; width:55%; height:100%; border-radius:6px;"></div></div>
+                    <div style="background:#0B132B; border-radius:6px; height:8px;"><div style="background:#F59E0B; width:{int(hr_score * 100)}%; height:100%; border-radius:6px;"></div></div>
                 </div>
                 
                 <div style="margin-bottom: 12px;">
                     <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #CBD5E1; margin-bottom: 4px;">
-                        <span>Steering pattern (weight 15%)</span><strong>0.50</strong>
+                        <span>Steering pattern (weight 15%)</span><strong>{detector.steering_variance:.2f}</strong>
                     </div>
-                    <div style="background:#0B132B; border-radius:6px; height:8px;"><div style="background:#F59E0B; width:50%; height:100%; border-radius:6px;"></div></div>
+                    <div style="background:#0B132B; border-radius:6px; height:8px;"><div style="background:#10B981; width:{int(detector.steering_variance * 100)}%; height:100%; border-radius:6px;"></div></div>
                 </div>
+                <div style="font-size: 0.75rem; color: #94A3B8; margin-top: 15px;">Weights are dynamically distributed based on active sensor feeds.</div>
                 
-                <div style="font-size: 0.75rem; color: #94A3B8; margin-top: 15px;">Weights are redistributed if a signal is unavailable.</div>
-                
-                <div style="background: rgba(245, 158, 11, 0.2); color: #F59E0B; border: 1px solid #F59E0B; font-weight: 700; padding: 6px 16px; border-radius: 20px; font-size: 0.85rem; display: inline-block; margin-top: 10px;">Amber - Warning</div>
+                <div style="background: {'rgba(239, 68, 68, 0.2)' if detector.fused_score >= 0.7 else ('rgba(245, 158, 11, 0.2)' if detector.fused_score >= 0.4 else 'rgba(16, 185, 129, 0.2)')}; color: {'#EF4444' if detector.fused_score >= 0.7 else ('#F59E0B' if detector.fused_score >= 0.4 else '#10B981')}; border: 1px solid {'#EF4444' if detector.fused_score >= 0.7 else ('#F59E0B' if detector.fused_score >= 0.4 else '#10B981')}; font-weight: 700; padding: 6px 16px; border-radius: 20px; font-size: 0.85rem; display: inline-block; margin-top: 10px;">
+                    {'Critical Risk' if detector.fused_score >= 0.7 else ('Amber - Moderate Warning' if detector.fused_score >= 0.4 else 'Green - Normal Low Risk')}
+                </div>
             </div>
             """,
             unsafe_allow_html=True

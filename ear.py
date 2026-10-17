@@ -120,4 +120,16 @@ def estimate_head_pose(face_landmarks, img_w, img_h):
     _, _, _, _, _, _, euler_angles = cv2.decomposeProjectionMatrix(proj_matrix)
     pitch, yaw, roll = euler_angles[0][0], euler_angles[1][0], euler_angles[2][0]
     
+    # Normalize angles so looking directly at the camera is ~0 degrees
+    def _norm_angle(deg):
+        if deg > 90:
+            return deg - 180
+        elif deg < -90:
+            return deg + 180
+        return deg
+
+    pitch = _norm_angle(pitch)
+    yaw = _norm_angle(yaw)
+    roll = _norm_angle(roll)
+    
     return round(float(pitch), 1), round(float(yaw), 1), round(float(roll), 1)
