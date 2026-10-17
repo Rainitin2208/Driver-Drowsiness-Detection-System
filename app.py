@@ -790,11 +790,11 @@ def render_live_monitoring():
     _render_cards(detector)
 
     if cam_source == "🌐 WebRTC Browser Camera":
-        if webrtc_ctx.state.playing:
+        if webrtc_ctx and webrtc_ctx.state.playing:
             while webrtc_ctx.state.playing:
                 active_det = getattr(webrtc_ctx.video_processor, "detector", None) or detector
                 _render_cards(active_det)
-                time.sleep(0.1)
+                time.sleep(0.25)
     else:
         if "opencv_streaming" not in st.session_state:
             st.session_state.opencv_streaming = False
@@ -804,37 +804,50 @@ def render_live_monitoring():
             st.session_state.opencv_streaming = False
 
         if st.session_state.opencv_streaming:
+            frame_placeholder.info("⏳ Initializing hardware webcam...")
             cap = None
             try:
-                for backend in [cv2.CAP_ANY, cv2.CAP_DSHOW]:
-                    cap = cv2.VideoCapture(0, backend)
-                    if cap.isOpened():
-                        ret_test, frame_test = cap.read()
-                        if ret_test and frame_test is not None:
+                for attempt in range(3):
+                    for idx in [0, 1, 2]:
+                        for backend in [cv2.CAP_ANY, cv2.CAP_DSHOW]:
+                            try:
+                                c = cv2.VideoCapture(idx, backend)
+                                if c.isOpened():
+                                    ret_test, frame_test = c.read()
+                                    if ret_test and frame_test is not None:
+                                        cap = c
+                                        break
+                                    c.release()
+                            except Exception:
+                                pass
+                        if cap is not None:
                             break
-                        cap.release()
-                        cap = None
+                    if cap is not None:
+                        break
+                    time.sleep(0.3)
                 
                 if cap is not None and cap.isOpened():
                     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
                     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                    st.success("🟢 OpenCV Camera Feed Active! Streaming in real-time...")
+                    frame_idx = 0
                     while st.session_state.get("opencv_streaming", False):
                         ret, frame = cap.read()
                         if not ret or frame is None:
-                            st.warning("Webcam frame capture interrupted.")
+                            frame_placeholder.warning("⚠️ Camera frame capture interrupted.")
                             break
                         annotated = detector.process_frame(frame)
                         frame_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
                         frame_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
-                        _render_cards(detector)
-                        time.sleep(0.01)
+                        if frame_idx % 5 == 0:
+                            _render_cards(detector)
+                        frame_idx += 1
+                        time.sleep(0.02)
                 else:
-                    st.error("Hardware Camera (OpenCV Index 0) not accessible. If you recently used 'WebRTC Browser Camera', please ensure it is stopped so the browser releases the camera hardware.")
+                    frame_placeholder.error("❌ Hardware Camera (OpenCV) could not be opened. Please ensure other camera applications (or browser tabs using WebRTC) are stopped, then try clicking 'Start Live OpenCV Stream' again.")
                     st.session_state.opencv_streaming = False
             except Exception as cam_err:
-                st.error(f"Camera stream error: {cam_err}")
+                frame_placeholder.error(f"❌ Camera stream error: {cam_err}")
                 st.session_state.opencv_streaming = False
             finally:
                 if cap is not None:

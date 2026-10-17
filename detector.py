@@ -128,8 +128,8 @@ class DrowsinessDetector:
                     base_options=BaseOptions(model_asset_path=str(model_file)),
                     running_mode=vision.RunningMode.IMAGE,
                     num_faces=1,
-                    min_face_detection_confidence=0.4,
-                    min_face_presence_confidence=0.4
+                    min_face_detection_confidence=0.3,
+                    min_face_presence_confidence=0.3
                 )
                 self.landmarker = vision.FaceLandmarker.create_from_options(options)
             except Exception:
@@ -185,10 +185,21 @@ class DrowsinessDetector:
                 res = self.landmarker.detect(mp_image)
                 if res and res.face_landmarks and len(res.face_landmarks) > 0:
                     landmarks = res.face_landmarks[0]
+                else:
+                    # Fallback: input frame might already be in RGB format
+                    frame_direct = np.ascontiguousarray(frame_bgr, dtype=np.uint8)
+                    mp_image2 = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_direct)
+                    res2 = self.landmarker.detect(mp_image2)
+                    if res2 and res2.face_landmarks and len(res2.face_landmarks) > 0:
+                        landmarks = res2.face_landmarks[0]
             elif self.face_mesh is not None:
                 results = self.face_mesh.process(frame_rgb)
                 if results and results.multi_face_landmarks and len(results.multi_face_landmarks) > 0:
                     landmarks = results.multi_face_landmarks[0]
+                else:
+                    results2 = self.face_mesh.process(frame_bgr)
+                    if results2 and results2.multi_face_landmarks and len(results2.multi_face_landmarks) > 0:
+                        landmarks = results2.multi_face_landmarks[0]
         except Exception:
             landmarks = None
 
