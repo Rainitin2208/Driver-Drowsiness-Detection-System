@@ -28,7 +28,8 @@ from utils import (
     generate_alarm_wav, generate_branding_assets,
     EventLogger, save_screenshot, get_html_audio_b64,
     stop_sound_alarm_pygame, load_mock_incidents, load_mock_drivers,
-    generate_report_file
+    generate_report_file, register_driver, authenticate_driver,
+    update_driver_profile, load_drivers_df
 )
 from detector import DrowsinessDetector
 
@@ -47,12 +48,14 @@ generate_branding_assets()
 # Initialize Detector in session state
 if "detector" not in st.session_state:
     st.session_state.detector = DrowsinessDetector()
-if "current_driver" not in st.session_state:
-    st.session_state.current_driver = DEFAULT_DRIVER.copy()
-if "incidents_df" not in st.session_state:
-    st.session_state.incidents_df = load_mock_incidents()
 if "drivers_list" not in st.session_state:
     st.session_state.drivers_list = load_mock_drivers()
+if "current_driver" not in st.session_state:
+    st.session_state.current_driver = st.session_state.drivers_list[0] if st.session_state.drivers_list else DEFAULT_DRIVER.copy()
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = True
+if "incidents_df" not in st.session_state:
+    st.session_state.incidents_df = load_mock_incidents()
 if "thresholds" not in st.session_state:
     st.session_state.thresholds = {
         "eye_closure": 2.0,
@@ -498,38 +501,101 @@ def render_driver_login():
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
+        current_drv = st.session_state.get("current_driver", {})
+        is_logged = st.session_state.get("logged_in", False)
+        
         st.markdown(
-            """
-            <div style="background: #1C2541; padding: 30px; border-radius: 16px; border: 1px solid #334155; text-align: center;">
-                <h2 style="color: #FFFFFF; margin: 0;">Welcome Back, Driver</h2>
-                <p style="color: #94A3B8;">Login to start your trip</p>
+            f"""
+            <div style="background: #1C2541; padding: 25px; border-radius: 16px; border: 1px solid #334155; text-align: center; margin-bottom: 20px;">
+                <h2 style="color: #FFFFFF; margin: 0;">DrowsiGuard Driver Portal</h2>
+                <p style="color: #94A3B8; margin-top: 5px;">Active: <strong style="color: #00B4D8;">{current_drv.get('name', 'None')}</strong> ({current_drv.get('driver_id', 'N/A')})</p>
+                <div style="font-size: 0.85rem; color: #10B981; font-weight: 600;">Status: {'🟢 Active Session' if is_logged else '⚪ Not Logged In'}</div>
             </div>
             """,
             unsafe_allow_html=True
         )
         
-        with st.form("driver_login_form"):
-            driver_id = st.text_input("Driver ID / Email", value="rahul.verma@fleet.in", max_chars=30)
-            password = st.text_input("Password", value="••••••••••", type="password", max_chars=20)
-            
-            c_forgot, c_sub = st.columns([1, 1])
-            with c_forgot:
-                st.caption("[Forgot Password?](#)")
-            with c_sub:
-                submitted = st.form_submit_button("Login", use_container_width=True, type="primary")
-                
-            if submitted:
-                if not driver_id:
-                    st.error("Please Enter Driver ID or Email")
-                elif not password:
-                    st.error("Please Enter Password")
-                elif driver_id != "rahul.verma@fleet.in":
-                    st.error("The Driver ID or Email is not Registered")
-                else:
-                    st.success("Login Successful! Redirecting to Calibration...")
-                    
-        st.caption("Max 30 characters • Password max 20 characters")
+        login_tab, register_tab = st.tabs(["🔑 Driver Login", "➕ Register New Driver"])
         
+        with login_tab:
+            with st.form("driver_login_form"):
+                driver_id = st.text_input("Driver ID or Email", value=current_drv.get("email", "rahul.verma@fleet.in"), max_chars=40)
+                password = st.text_input("Password", value="Password123@", type="password", max_chars=30)
+                
+                c_forgot, c_sub = st.columns([1, 1])
+                with c_forgot:
+                    st.caption("[Forgot Password?](#)")
+                with c_sub:
+                    submitted = st.form_submit_button("Login", use_container_width=True, type="primary")
+                    
+                if submitted:
+                    if not driver_id:
+                        st.error("Please enter your Driver ID or Email.")
+                    elif not password:
+                        st.error("Please enter your Password.")
+                    else:
+                        success, result = authenticate_driver(driver_id, password)
+                        if success:
+                            st.session_state.current_driver = result
+                            st.session_state.logged_in = True
+                            st.session_state.drivers_list = load_mock_drivers()
+                            st.success(f"🎉 Login Successful! Welcome back, {result['name']}.")
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {result}")
+            
+            with st.expander("ℹ️ Demo Credentials (Click to View)"):
+                st.markdown("""
+                You can log in with any registered fleet driver (Password: `Password123@`):
+                - **Rahul Verma**: `rahul.verma@fleet.in` or `DRV2026A`
+                - **Amit Singh**: `amit.singh@fleet.in` or `DRV2026B`
+                - **Sunil Yadav**: `sunil.yadav@fleet.in` or `DRV2026C`
+                - **Deepak Mishra**: `deepak.mishra@fleet.in` or `DRV2026D`
+                - **Karan Gupta**: `karan.gupta@fleet.in` or `DRV2026E`
+                - *Or create your own driver in the 'Register New Driver' tab!*
+                """)
+                
+        with register_tab:
+            with st.form("driver_quick_register_form"):
+                reg_name = st.text_input("Driver Full Name *", placeholder="e.g. Nitin Rai")
+                c_r1, c_r2 = st.columns(2)
+                with c_r1:
+                    reg_email = st.text_input("Email ID *", placeholder="e.g. nitin@fleet.in")
+                    reg_id = st.text_input("Driver ID *", placeholder="e.g. DRV2026N")
+                with c_r2:
+                    reg_phone = st.text_input("Phone Number * (10 digits)", placeholder="e.g. 9876543210")
+                    reg_vehicle = st.text_input("Vehicle Number", placeholder="e.g. UP32-NR-1001")
+                    
+                c_p1, c_p2 = st.columns(2)
+                with c_p1:
+                    reg_password = st.text_input("Create Password *", type="password")
+                with c_p2:
+                    reg_confirm = st.text_input("Confirm Password *", type="password")
+                    
+                reg_submit = st.form_submit_button("Register & Login", use_container_width=True, type="primary")
+                if reg_submit:
+                    if reg_password != reg_confirm:
+                        st.error("Passwords do not match. Please re-enter.")
+                    else:
+                        success, res = register_driver(
+                            name=reg_name,
+                            email=reg_email,
+                            password=reg_password,
+                            driver_id=reg_id,
+                            phone=reg_phone,
+                            vehicle_id=reg_vehicle
+                        )
+                        if success:
+                            st.session_state.current_driver = res
+                            st.session_state.logged_in = True
+                            st.session_state.drivers_list = load_mock_drivers()
+                            st.success(f"✅ Driver '{reg_name}' registered successfully and logged in!")
+                            time.sleep(0.6)
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {res}")
+                            
     render_edge_footer()
 
 def render_forgot_password():
@@ -1207,11 +1273,15 @@ def render_logout_confirmation():
     
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
+        current_drv = st.session_state.get("current_driver", {})
+        is_logged = st.session_state.get("logged_in", False)
+        
         st.markdown(
-            """
+            f"""
             <div class="edge-card" style="text-align: center; padding: 40px 20px;">
-                <h2 style="color: #FFFFFF; margin: 0;">Log out?</h2>
-                <p style="color: #94A3B8; margin: 15px 0 30px 0;">End the current trip before logging out.</p>
+                <h2 style="color: #FFFFFF; margin: 0;">Log out Driver?</h2>
+                <p style="color: #94A3B8; margin: 15px 0 10px 0;">Active Driver: <strong style="color:#00B4D8;">{current_drv.get('name', 'None')}</strong> ({current_drv.get('driver_id', 'N/A')})</p>
+                <p style="color: #64748B; font-size: 0.85rem; margin-bottom: 25px;">Vehicle: {current_drv.get('vehicle_id', 'N/A')}</p>
             </div>
             """,
             unsafe_allow_html=True
@@ -1222,7 +1292,17 @@ def render_logout_confirmation():
             st.button("Cancel", use_container_width=True)
         with b_logout:
             if st.button("Logout", type="primary", use_container_width=True):
-                st.warning("Trip must be ended before logout!")
+                st.session_state.logged_in = False
+                st.session_state.current_driver = {
+                    "driver_id": "LOGGED_OUT",
+                    "name": "Guest (Logged Out)",
+                    "vehicle_id": "N/A",
+                    "shift": "None",
+                    "email": ""
+                }
+                st.success("Logged out successfully! Please navigate to '4.1 Driver Login' to sign in.")
+                time.sleep(0.5)
+                st.rerun()
 
     render_edge_footer()
 
@@ -1286,45 +1366,81 @@ def render_create_driver():
         with st.form("create_driver_form"):
             col1, col2 = st.columns(2)
             with col1:
-                name = st.text_input("Driver Name", value="Rahul Verma")
-                email = st.text_input("Email ID", value="rahul.verma@fleet.in")
-                password = st.text_input("Password (8-20 characters)", value="••••••••••", type="password")
+                name = st.text_input("Driver Name *", placeholder="e.g. Ramesh Kumar")
+                email = st.text_input("Email ID *", placeholder="e.g. ramesh@fleet.in")
+                password = st.text_input("Password (min 6 chars) *", type="password")
             with col2:
-                driver_id = st.text_input("Driver ID (min 6, alphanumeric)", value="DRV2026A")
-                phone = st.text_input("Phone Number", value="9876543210")
-                confirm_password = st.text_input("Confirm Password", value="••••••••••", type="password")
+                driver_id = st.text_input("Driver ID (e.g. DRV2026R) *", placeholder="DRV2026...")
+                phone = st.text_input("Phone Number * (10 digits)", placeholder="9876543210")
+                confirm_password = st.text_input("Confirm Password *", type="password")
+                
+            c_v1, c_v2 = st.columns(2)
+            with c_v1:
+                vehicle_id = st.text_input("Assigned Vehicle ID (Optional)", placeholder="e.g. UP32-AB-9999")
+            with c_v2:
+                shift = st.selectbox("Shift Type", ["Day (8 AM – 5 PM)", "Night (10 PM – 6 AM)", "Rotating"])
                 
             submitted = st.form_submit_button("Create Driver", type="primary")
             if submitted:
-                if len(driver_id) < 6 or not driver_id.isalnum():
-                    st.error("Driver ID must be alphanumeric and a minimum of 6 characters.")
-                elif len(phone) != 10 or not phone.isdigit():
-                    st.error("Phone number must be a valid 10-digit number.")
+                if password != confirm_password:
+                    st.error("Passwords do not match. Please re-enter.")
                 else:
-                    st.success("Driver Account Created Successfully!")
+                    success, res = register_driver(
+                        name=name,
+                        email=email,
+                        password=password,
+                        driver_id=driver_id,
+                        phone=phone,
+                        vehicle_id=vehicle_id,
+                        shift=shift
+                    )
+                    if success:
+                        st.session_state.drivers_list = load_mock_drivers()
+                        st.success(f"🎉 Driver '{name}' ({driver_id.upper()}) created and saved to database successfully!")
+                        time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {res}")
 
     with c_rules:
         st.markdown(
             """
             <div style="background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 12px; padding: 20px; color: #1E3A8A;">
-                <h4 style="margin-top:0;">Password rules</h4>
-                <div style="margin-bottom: 6px;">✓ 8–20 characters</div>
-                <div style="margin-bottom: 6px;">✓ 1 uppercase letter</div>
-                <div style="margin-bottom: 6px;">✓ 1 lowercase letter</div>
-                <div style="margin-bottom: 6px;">✓ 1 numeric digit</div>
-                <div style="margin-bottom: 6px;">✓ 1 special character</div>
-                <div>✓ No whitespace</div>
+                <h4 style="margin-top:0;">Driver Registration Rules</h4>
+                <div style="margin-bottom: 6px;">✓ Unique Driver ID & Email required</div>
+                <div style="margin-bottom: 6px;">✓ Minimum 6 characters password</div>
+                <div style="margin-bottom: 6px;">✓ Valid 10-digit phone number</div>
+                <div style="margin-bottom: 6px;">✓ Instant persistence to <code>data/drivers.csv</code></div>
+                <div>✓ Driver can immediately log in from the Edge Unit</div>
             </div>
             """,
             unsafe_allow_html=True
         )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("### 📋 Registered Fleet Drivers Database")
+    drivers_df = load_drivers_df()
+    display_cols = ["driver_id", "name", "email", "phone", "vehicle_id", "shift", "calibration_status"]
+    available_cols = [c for c in display_cols if c in drivers_df.columns]
+    st.dataframe(drivers_df[available_cols], use_container_width=True)
 
 def render_driver_profile_assignment():
     render_browser_header("drivers/profile")
     
     st.markdown("## Driver Profile & Vehicle Assignment")
     
-    driver = st.session_state.current_driver
+    drivers = st.session_state.drivers_list
+    driver_names = [d["name"] for d in drivers] if drivers else ["Rahul Verma"]
+    
+    current_name = st.session_state.current_driver.get("name", driver_names[0])
+    default_idx = driver_names.index(current_name) if current_name in driver_names else 0
+    
+    selected_name = st.selectbox("Select Driver to View / Edit Profile", driver_names, index=default_idx)
+    selected_driver = next((d for d in drivers if d["name"] == selected_name), st.session_state.current_driver)
+    
+    name_parts = selected_driver.get("name", "").split(" ", 1)
+    first_name = name_parts[0]
+    last_name = name_parts[1] if len(name_parts) > 1 else ""
     
     c_photo, c_info = st.columns([1, 4])
     with c_photo:
@@ -1334,18 +1450,37 @@ def render_driver_profile_assignment():
     with c_info:
         c1, c2 = st.columns(2)
         with c1:
-            st.text_input("First Name", value="Rahul")
-            st.text_input("Date of Birth", value="14 / 08 / 1994")
-            st.text_input("Shift Type", value="Night (10 PM – 6 AM)")
-            st.text_input("Emergency Contact", value="9876500011 (optional)")
+            fn = st.text_input("First Name", value=first_name)
+            dob = st.text_input("Date of Birth", value=str(selected_driver.get("dob", "14 / 08 / 1994")))
+            shift = st.text_input("Shift Type", value=str(selected_driver.get("shift", "Night (10 PM – 6 AM)")))
+            phone = st.text_input("Phone / Contact", value=str(selected_driver.get("phone", "9876543210")))
         with c2:
-            st.text_input("Last Name", value="Verma")
-            st.text_input("Licence Number", value="UP32 20190012345")
-            st.text_input("Assigned Vehicle ID", value="UP32-AB-1234")
-            st.text_input("Calibration Status", value="Completed", disabled=True)
+            ln = st.text_input("Last Name", value=last_name)
+            lic = st.text_input("Licence Number", value=str(selected_driver.get("licence_no", "UP32 20190012345")))
+            veh = st.text_input("Assigned Vehicle ID", value=str(selected_driver.get("vehicle_id", "UP32-AB-1234")))
+            calib = st.text_input("Calibration Status", value=str(selected_driver.get("calibration_status", "Completed")), disabled=True)
             
         if st.button("Save Profile & Assignment", type="primary"):
-            st.success("Profile details updated successfully.")
+            updated_name = f"{fn.strip()} {ln.strip()}".strip()
+            up_dict = {
+                "name": updated_name,
+                "dob": dob.strip(),
+                "shift": shift.strip(),
+                "phone": phone.strip(),
+                "licence_no": lic.strip(),
+                "vehicle_id": veh.strip()
+            }
+            drv_id = selected_driver.get("driver_id", "")
+            success, msg = update_driver_profile(drv_id, up_dict)
+            if success:
+                st.session_state.drivers_list = load_mock_drivers()
+                if st.session_state.current_driver.get("driver_id") == drv_id:
+                    st.session_state.current_driver.update(up_dict)
+                st.success(f"Profile details for {updated_name} updated successfully.")
+                time.sleep(0.5)
+                st.rerun()
+            else:
+                st.error(msg)
 
 def render_driver_scorecards():
     render_browser_header("drivers")
@@ -1353,56 +1488,65 @@ def render_driver_scorecards():
     st.markdown("## Driver Scorecards")
     
     c_list, c_details = st.columns([2, 3])
+    drivers = st.session_state.drivers_list
     
     with c_list:
-        st.text_input("🔍 Search driver name / ID")
-        drivers = st.session_state.drivers_list
-        for d in drivers:
-            dot_color = "#EF4444" if d['status_color'] == 'red' else "#F59E0B" if d['status_color'] == 'amber' else "#10B981"
-            st.markdown(
-                f"""
-                <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:8px; padding:12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <strong style="color:#0F172A;">{d['name']}</strong>
-                        <div style="font-size:0.8rem; color:#64748B;">{d['incidents']} incidents</div>
-                    </div>
-                    <div style="width:14px; height:14px; border-radius:50%; background:{dot_color};"></div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+        search_query = st.text_input("🔍 Search driver name / ID", value="").strip().lower()
+        if search_query:
+            filtered_drivers = [d for d in drivers if search_query in str(d.get("name","")).lower() or search_query in str(d.get("driver_id","")).lower()]
+        else:
+            filtered_drivers = drivers
+            
+        if not filtered_drivers:
+            st.info("No drivers match your search.")
+            selected_d = drivers[0] if drivers else {}
+        else:
+            driver_choices = [f"{d['name']} • {d['driver_id']}" for d in filtered_drivers]
+            sel_idx = st.radio("Select Driver to Inspect:", range(len(driver_choices)), format_func=lambda x: driver_choices[x])
+            selected_d = filtered_drivers[sel_idx]
 
     with c_details:
-        st.markdown("### Rahul Verma • DRV2026A")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Trips", "42")
-        m2.metric("Incidents", "7")
-        m3.metric("Avg score", "0.41")
-        m4.metric("High sev.", "2")
-        
-        st.markdown("#### 30-day fatigue trend")
-        x_trend = np.linspace(1, 30, 10)
-        y_trend = [0.2, 0.3, 0.25, 0.4, 0.5, 0.35, 0.6, 0.45, 0.7, 0.62]
-        fig_tr = px.line(x=x_trend, y=y_trend)
-        fig_tr.update_traces(line_color='#1E40AF', line_width=3)
-        fig_tr.update_layout(height=180, margin=dict(l=10, r=10, t=10, b=10))
-        st.plotly_chart(fig_tr, use_container_width=True)
+        if selected_d:
+            st.markdown(f"### {selected_d.get('name', 'Driver')} • {selected_d.get('driver_id', 'N/A')}")
+            st.caption(f"Vehicle: **{selected_d.get('vehicle_id', 'N/A')}** | Shift: **{selected_d.get('shift', 'N/A')}**")
+            
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Trips", str(selected_d.get("trips", 0)))
+            m2.metric("Incidents", str(selected_d.get("incidents", 0)))
+            m3.metric("Avg score", f"{float(selected_d.get('avg_score', 0.20)):.2f}")
+            m4.metric("High sev.", str(selected_d.get("high_sev", 0)))
+            
+            st.markdown("#### 30-day fatigue trend")
+            x_trend = np.linspace(1, 30, 10)
+            base_score = float(selected_d.get("avg_score", 0.3))
+            y_trend = [round(max(0.1, min(0.9, base_score + 0.1 * np.sin(i))), 2) for i in x_trend]
+            fig_tr = px.line(x=x_trend, y=y_trend, labels={'x': 'Days in Month', 'y': 'Fatigue Score'})
+            fig_tr.update_traces(line_color='#1E40AF', line_width=3)
+            fig_tr.update_layout(height=180, margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(fig_tr, use_container_width=True)
 
-        st.markdown("#### Severity breakdown")
-        st.markdown("""
-        <div style="margin-bottom:6px;">Low &nbsp;<span style="background:#10B981; padding:2px 120px; border-radius:4px; color:white; font-weight:700;">3</span></div>
-        <div style="margin-bottom:6px;">Medium &nbsp;<span style="background:#F59E0B; padding:2px 80px; border-radius:4px; color:white; font-weight:700;">2</span></div>
-        <div>High &nbsp;<span style="background:#EF4444; padding:2px 80px; border-radius:4px; color:white; font-weight:700;">2</span></div>
-        """, unsafe_allow_html=True)
+            sev = selected_d.get("severity_breakdown", {})
+            if not isinstance(sev, dict):
+                sev = {"Low": 1, "Medium": 0, "High": 0}
+            st.markdown("#### Severity breakdown")
+            st.markdown(f"""
+            <div style="margin-bottom:6px;">Low &nbsp;<span style="background:#10B981; padding:2px 30px; border-radius:4px; color:white; font-weight:700;">{sev.get('Low', 0)}</span></div>
+            <div style="margin-bottom:6px;">Medium &nbsp;<span style="background:#F59E0B; padding:2px 30px; border-radius:4px; color:white; font-weight:700;">{sev.get('Medium', 0)}</span></div>
+            <div>High &nbsp;<span style="background:#EF4444; padding:2px 30px; border-radius:4px; color:white; font-weight:700;">{sev.get('High', 0)}</span></div>
+            """, unsafe_allow_html=True)
 
 def render_incident_review():
     render_browser_header("incidents")
     
     st.markdown("## Incident Review Workflow")
     
+    drivers = st.session_state.drivers_list
+    driver_names = ["All Drivers"] + [d["name"] for d in drivers]
+    vehicle_ids = ["All Vehicles"] + list(dict.fromkeys([d["vehicle_id"] for d in drivers if d.get("vehicle_id")]))
+    
     f1, f2, f3, f4 = st.columns(4)
-    f1.selectbox("Vehicle", ["All Vehicles", "UP32-AB-1234", "UP32-CD-5678"])
-    f2.selectbox("Driver", ["All Drivers", "Rahul Verma", "Amit Singh"])
+    f1.selectbox("Vehicle", vehicle_ids)
+    f2.selectbox("Driver", driver_names)
     f3.selectbox("Severity", ["All Severities", "High", "Medium", "Low"])
     f4.selectbox("Status", ["All Status", "Open", "Under Review", "Closed"])
     

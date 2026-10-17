@@ -1,0 +1,6 @@
+driver_id,name,email,password,phone,vehicle_id,licence_no,dob,shift,calibration_status,baseline_ear,resting_hr,trips,incidents,avg_score,high_sev,status_color
+DRV2026A,Rahul Verma,rahul.verma@fleet.in,Password123@,9876543210,UP32-AB-1234,UP32 20190012345,14 / 08 / 1994,Night (10 PM – 6 AM),Completed,0.31,70,42,7,0.41,2,red
+DRV2026B,Amit Singh,amit.singh@fleet.in,Password123@,9876543211,UP32-CD-5678,UP32 20180054321,20 / 05 / 1992,Day (8 AM – 5 PM),Completed,0.29,68,38,4,0.32,1,amber
+DRV2026C,Sunil Yadav,sunil.yadav@fleet.in,Password123@,9876543212,UP32-EF-9012,UP32 20200098765,10 / 11 / 1990,Day (8 AM – 5 PM),Completed,0.32,65,50,2,0.18,0,green
+DRV2026D,Deepak Mishra,deepak.mishra@fleet.in,Password123@,9876543213,UP32-IJ-7890,UP32 20210045678,05 / 03 / 1996,Night (10 PM – 6 AM),Completed,0.30,72,31,1,0.15,0,green
+DRV2026E,Karan Gupta,karan.gupta@fleet.in,Password123@,9876543214,UP32-GH-3456,UP32 20170067890,22 / 09 / 1993,Day (8 AM – 5 PM),Completed,0.28,74,45,5,0.39,1,amber

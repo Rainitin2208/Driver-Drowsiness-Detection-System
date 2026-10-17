@@ -17,6 +17,7 @@ screenshots/*
 !screenshots/.gitkeep
 data/*
 !data/.gitkeep
+!data/drivers.csv
 history.csv
 
 # IDE / OS
