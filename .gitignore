@@ -1,0 +1,26 @@
+# Python bytecode / environment
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# Streamlit
+.streamlit/
+
+# Saved data and user snapshots (keep directory structure)
+screenshots/*
+!screenshots/.gitkeep
+data/*
+!data/.gitkeep
+history.csv
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
