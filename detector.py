@@ -128,8 +128,8 @@ class DrowsinessDetector:
                     base_options=BaseOptions(model_asset_path=str(model_file)),
                     running_mode=vision.RunningMode.IMAGE,
                     num_faces=1,
-                    min_face_detection_confidence=0.5,
-                    min_face_presence_confidence=0.5
+                    min_face_detection_confidence=0.4,
+                    min_face_presence_confidence=0.4
                 )
                 self.landmarker = vision.FaceLandmarker.create_from_options(options)
             except Exception:
@@ -177,7 +177,7 @@ class DrowsinessDetector:
         annotated_frame = frame_bgr.copy()
         
         landmarks = None
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        frame_rgb = np.ascontiguousarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB), dtype=np.uint8)
         
         try:
             if self.use_tasks and self.landmarker is not None:
@@ -251,7 +251,8 @@ class DrowsinessDetector:
                         else:
                             status_str = f"Face Found | EAR: {self.current_ear:.2f}"
                             status_color = (16, 185, 129)
-                        cv2.putText(annotated_frame, status_str, (min_x, min_y - 10),
+                        text_y = max(25, min_y - 10)
+                        cv2.putText(annotated_frame, status_str, (min_x, text_y),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
 
                     
@@ -293,6 +294,8 @@ class DrowsinessDetector:
                 self.fatigue_history.append((elapsed, self.fused_score))
             else:
                 self.face_detected = False
+                cv2.putText(annotated_frame, "Searching for face...", (30, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
                 
         return annotated_frame
 

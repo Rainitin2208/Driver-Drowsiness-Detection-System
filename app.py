@@ -736,9 +736,11 @@ def render_live_monitoring():
             unsafe_allow_html=True
         )
 
-    def _render_cards():
-        status_class = "status-alert" if not detector.is_drowsy else "status-drowsy"
-        status_text = "ALERT" if not detector.is_drowsy else "DROWSY"
+    def _render_cards(det=None):
+        if det is None:
+            det = detector
+        status_class = "status-alert" if not det.is_drowsy else "status-drowsy"
+        status_text = "ALERT" if not det.is_drowsy else "DROWSY"
         status_placeholder.markdown(
             f"""
             <div class="edge-card" style="display: flex; justify-content: space-between; align-items: center;">
@@ -757,12 +759,12 @@ def render_live_monitoring():
         metrics_placeholder.markdown(
             f"""
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin: 12px 0;">
-                <div class="edge-card"><div class="edge-metric-label">EAR</div><div class="edge-metric-val">{detector.current_ear}</div></div>
-                <div class="edge-card"><div class="edge-metric-label">Blink rate</div><div class="edge-metric-val">{detector.blink_count}<span style="font-size:0.9rem; font-weight:400;">/min</span></div></div>
-                <div class="edge-card"><div class="edge-metric-label">Eye closure</div><div class="edge-metric-val">{'2.4 s' if detector.is_drowsy else '0.2 s'}</div></div>
-                <div class="edge-card"><div class="edge-metric-label">Yawns</div><div class="edge-metric-val">{detector.yawn_count}</div></div>
-                <div class="edge-card"><div class="edge-metric-label">Head pose</div><div class="edge-metric-val">{abs(int(detector.pitch))}°</div></div>
-                <div class="edge-card"><div class="edge-metric-label">Heart rate</div><div class="edge-metric-val">{detector.heart_rate}<span style="font-size:0.9rem; font-weight:400;">bpm</span></div></div>
+                <div class="edge-card"><div class="edge-metric-label">EAR</div><div class="edge-metric-val">{det.current_ear:.2f}</div></div>
+                <div class="edge-card"><div class="edge-metric-label">Blink rate</div><div class="edge-metric-val">{det.blink_count}<span style="font-size:0.9rem; font-weight:400;">/min</span></div></div>
+                <div class="edge-card"><div class="edge-metric-label">Eye closure</div><div class="edge-metric-val">{'2.4 s' if det.is_drowsy else '0.2 s'}</div></div>
+                <div class="edge-card"><div class="edge-metric-label">Yawns</div><div class="edge-metric-val">{det.yawn_count}</div></div>
+                <div class="edge-card"><div class="edge-metric-label">Head pose</div><div class="edge-metric-val">{abs(int(det.pitch))}°</div></div>
+                <div class="edge-card"><div class="edge-metric-label">Heart rate</div><div class="edge-metric-val">{det.heart_rate}<span style="font-size:0.9rem; font-weight:400;">bpm</span></div></div>
             </div>
             """,
             unsafe_allow_html=True
@@ -772,10 +774,10 @@ def render_live_monitoring():
             <div class="edge-card">
                 <div style="color: #94A3B8; font-size: 0.85rem; text-transform: uppercase;">Fatigue Score (fused)</div>
                 <div style="background-color: #0B132B; border-radius: 8px; height: 14px; margin: 8px 0;">
-                    <div style="background-color: #10B981; width: {int(detector.fused_score * 100)}%; height: 100%; border-radius: 8px;"></div>
+                    <div style="background-color: #10B981; width: {int(det.fused_score * 100)}%; height: 100%; border-radius: 8px;"></div>
                 </div>
                 <div style="font-size: 1.1rem; font-weight: 800; color: #10B981;">
-                    {detector.fused_score} • Low risk
+                    {det.fused_score:.2f} • {'High risk' if det.fused_score > 0.6 else ('Moderate' if det.fused_score > 0.4 else 'Low risk')}
                 </div>
                 <div style="color: #94A3B8; font-size: 0.8rem; margin-top: 4px;">
                     Signals: Eye ✓ &nbsp; Yawn ✓ &nbsp; Head ✓ &nbsp; HR ✓ &nbsp; Steering ✓
@@ -785,9 +787,15 @@ def render_live_monitoring():
             unsafe_allow_html=True
         )
 
-    _render_cards()
+    _render_cards(detector)
 
-    if cam_source != "🌐 WebRTC Browser Camera":
+    if cam_source == "🌐 WebRTC Browser Camera":
+        if webrtc_ctx.state.playing:
+            while webrtc_ctx.state.playing:
+                active_det = getattr(webrtc_ctx.video_processor, "detector", None) or detector
+                _render_cards(active_det)
+                time.sleep(0.1)
+    else:
         if "opencv_streaming" not in st.session_state:
             st.session_state.opencv_streaming = False
         if start_btn:
@@ -796,24 +804,44 @@ def render_live_monitoring():
             st.session_state.opencv_streaming = False
 
         if st.session_state.opencv_streaming:
-            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-            if not cap.isOpened():
-                cap = cv2.VideoCapture(0)
-            if cap.isOpened():
-                st.success("OpenCV Camera Feed Active! Streaming in real-time...")
-                while cap.isOpened() and st.session_state.get("opencv_streaming", False):
-                    ret, frame = cap.read()
-                    if not ret:
-                        st.warning("Failed to grab camera frame.")
-                        break
-                    annotated = detector.process_frame(frame)
-                    frame_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
-                    frame_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
-                    _render_cards()
-                    time.sleep(0.01)
-                cap.release()
-            else:
-                st.error("Hardware Camera (OpenCV Index 0) not accessible or currently in use by another app.")
+            cap = None
+            try:
+                for backend in [cv2.CAP_ANY, cv2.CAP_DSHOW]:
+                    cap = cv2.VideoCapture(0, backend)
+                    if cap.isOpened():
+                        ret_test, frame_test = cap.read()
+                        if ret_test and frame_test is not None:
+                            break
+                        cap.release()
+                        cap = None
+                
+                if cap is not None and cap.isOpened():
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    st.success("🟢 OpenCV Camera Feed Active! Streaming in real-time...")
+                    while st.session_state.get("opencv_streaming", False):
+                        ret, frame = cap.read()
+                        if not ret or frame is None:
+                            st.warning("Webcam frame capture interrupted.")
+                            break
+                        annotated = detector.process_frame(frame)
+                        frame_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+                        frame_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
+                        _render_cards(detector)
+                        time.sleep(0.01)
+                else:
+                    st.error("Hardware Camera (OpenCV Index 0) not accessible. If you recently used 'WebRTC Browser Camera', please ensure it is stopped so the browser releases the camera hardware.")
+                    st.session_state.opencv_streaming = False
+            except Exception as cam_err:
+                st.error(f"Camera stream error: {cam_err}")
+                st.session_state.opencv_streaming = False
+            finally:
+                if cap is not None:
+                    try:
+                        cap.release()
+                    except Exception:
+                        pass
 
     render_edge_footer()
 
