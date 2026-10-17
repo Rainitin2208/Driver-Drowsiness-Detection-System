@@ -701,6 +701,7 @@ def render_live_monitoring():
             )
         else: # Direct OpenCV Webcam
             st.info("Capturing live video feed directly from system webcam (OpenCV VideoCapture)...")
+            st.caption("💡 *Note: Windows allows only one application to access the webcam at a time. If WebRTC was running, stop it or refresh (F5) so the browser releases the camera hardware.*")
             frame_placeholder = st.empty()
             col_start, col_stop = st.columns(2)
             with col_start:
@@ -844,7 +845,7 @@ def render_live_monitoring():
                         frame_idx += 1
                         time.sleep(0.02)
                 else:
-                    frame_placeholder.error("❌ Hardware Camera (OpenCV) could not be opened. Please ensure other camera applications (or browser tabs using WebRTC) are stopped, then try clicking 'Start Live OpenCV Stream' again.")
+                    frame_placeholder.error("❌ Hardware Camera (OpenCV) could not be opened.\n\n**Quick Solution:** On Windows, only one application can access the webcam at a time. If you were using 'WebRTC Browser Camera', click **'Stop'** on WebRTC or refresh the browser page (press F5), then click 'Start Live OpenCV Stream'.")
                     st.session_state.opencv_streaming = False
             except Exception as cam_err:
                 frame_placeholder.error(f"❌ Camera stream error: {cam_err}")

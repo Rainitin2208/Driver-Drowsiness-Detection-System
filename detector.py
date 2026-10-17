@@ -145,6 +145,16 @@ class DrowsinessDetector:
             except Exception:
                 self.face_mesh = None
 
+        # OpenCV Haar Cascade fallback detectors
+        self.face_cascade = None
+        self.eye_cascade = None
+        try:
+            self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+        except Exception:
+            self.face_cascade = None
+            self.eye_cascade = None
+
     def update_settings(self, ear_threshold, consec_frames, alarm_enabled):
         with self.lock:
             self.ear_threshold = ear_threshold
@@ -202,6 +212,35 @@ class DrowsinessDetector:
                         landmarks = results2.multi_face_landmarks[0]
         except Exception:
             landmarks = None
+
+        # Stage 3 Fallback: Haar Cascade + MediaPipe cropped detection
+        haar_face_box = None
+        if landmarks is None and self.face_cascade is not None:
+            try:
+                gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+                faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=4, minSize=(60, 60))
+                if len(faces) > 0:
+                    fx, fy, fw, fh = [int(v) for v in faces[0]]
+                    haar_face_box = (fx, fy, fw, fh)
+                    
+                    pad_x, pad_y = int(fw * 0.15), int(fh * 0.15)
+                    cx1, cy1 = max(0, fx - pad_x), max(0, fy - pad_y)
+                    cx2, cy2 = min(img_w, fx + fw + pad_x), min(img_h, fy + fh + pad_y)
+                    face_crop = frame_bgr[cy1:cy2, cx1:cx2]
+                    
+                    if face_crop.size > 0 and self.use_tasks and self.landmarker is not None:
+                        crop_rgb = np.ascontiguousarray(cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB), dtype=np.uint8)
+                        mp_crop = mp.Image(image_format=mp.ImageFormat.SRGB, data=crop_rgb)
+                        crop_res = self.landmarker.detect(mp_crop)
+                        if crop_res and crop_res.face_landmarks and len(crop_res.face_landmarks) > 0:
+                            crop_lms = crop_res.face_landmarks[0]
+                            cw, ch = (cx2 - cx1), (cy2 - cy1)
+                            for lm in crop_lms:
+                                lm.x = (cx1 + lm.x * cw) / img_w
+                                lm.y = (cy1 + lm.y * ch) / img_h
+                            landmarks = crop_lms
+            except Exception:
+                pass
 
         with self.lock:
             if landmarks is not None:
@@ -301,6 +340,49 @@ class DrowsinessDetector:
                             stop_sound_alarm_pygame()
 
                 
+                self.fused_score = self.compute_fused_score()
+                self.fatigue_history.append((elapsed, self.fused_score))
+            elif haar_face_box is not None:
+                self.face_detected = True
+                fx, fy, fw, fh = haar_face_box
+                
+                # Check eyes in upper face region
+                eyes = []
+                if self.eye_cascade is not None:
+                    try:
+                        gray_face = cv2.cvtColor(frame_bgr[fy:fy+fh, fx:fx+fw], cv2.COLOR_BGR2GRAY)
+                        upper_face = gray_face[:int(fh * 0.6), :]
+                        eyes = self.eye_cascade.detectMultiScale(upper_face, scaleFactor=1.1, minNeighbors=3)
+                    except Exception:
+                        eyes = []
+                
+                if len(eyes) >= 1:
+                    self.current_ear = 0.28
+                    self.drowsy_counter = 0
+                    if self.is_drowsy:
+                        self.is_drowsy = False
+                        self.alert_stage = 0
+                        stop_sound_alarm_pygame()
+                else:
+                    self.drowsy_counter += 1
+                    if self.drowsy_counter >= 4:
+                        self.current_ear = 0.18
+                        if self.drowsy_counter >= self.consec_frames:
+                            if not self.is_drowsy:
+                                self.is_drowsy = True
+                                self.total_alerts += 1
+                                self.alert_stage = 1
+                            if self.alarm_enabled and not self.muted_chime:
+                                play_sound_alarm_pygame()
+                
+                box_color = (0, 0, 255) if self.is_drowsy else (16, 185, 129)
+                cv2.rectangle(annotated_frame, (fx, fy), (fx + fw, fy + fh), box_color, 2)
+                status_str = f"DROWSINESS DETECTED! (EAR: {self.current_ear:.2f})" if self.is_drowsy else f"Face Found | EAR: {self.current_ear:.2f}"
+                cv2.putText(annotated_frame, status_str, (fx, max(25, fy - 10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, box_color, 2)
+                
+                elapsed = round(time.time() - self.session_start_time, 1)
+                self.ear_history.append((elapsed, self.current_ear))
                 self.fused_score = self.compute_fused_score()
                 self.fatigue_history.append((elapsed, self.fused_score))
             else:
