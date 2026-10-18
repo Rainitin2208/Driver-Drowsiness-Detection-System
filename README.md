@@ -1,3 +1,14 @@
+---
+title: Driver Drowsiness Detection System
+emoji: 🚗
+colorFrom: blue
+colorTo: indigo
+sdk: streamlit
+sdk_version: 1.30.0
+app_file: app.py
+pinned: false
+---
+
 # 🚗 AI-Based Driver Drowsiness Detection System
 
 ![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
