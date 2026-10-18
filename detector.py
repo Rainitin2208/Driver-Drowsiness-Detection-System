@@ -115,35 +115,21 @@ class DrowsinessDetector:
         self.logger = EventLogger()
         self._was_eye_closed = False
 
-        # MediaPipe initialization
-        self.use_tasks = USE_TASKS_API
+        # MediaPipe initialization (tries Tasks API and legacy FaceMesh; records why it failed)
+        self.use_tasks = False
         self.face_mesh = None
         self.landmarker = None
+        self.engine_error = None
+        self._infer_lock = threading.Lock()
 
-        if self.use_tasks:
-            try:
-                model_file = ensure_mediapipe_model_exists()
-                from mediapipe.tasks.python import vision, BaseOptions
-                options = vision.FaceLandmarkerOptions(
-                    base_options=BaseOptions(model_asset_path=str(model_file)),
-                    running_mode=vision.RunningMode.IMAGE,
-                    num_faces=1,
-                    min_face_detection_confidence=0.3,
-                    min_face_presence_confidence=0.3
-                )
-                self.landmarker = vision.FaceLandmarker.create_from_options(options)
-            except Exception:
-                self.landmarker = None
-        elif mp_solutions_facemesh is not None:
-            try:
-                self.face_mesh = mp_solutions_facemesh.FaceMesh(
-                    max_num_faces=1,
-                    refine_landmarks=True,
-                    min_detection_confidence=0.5,
-                    min_tracking_confidence=0.5
-                )
-            except Exception:
-                self.face_mesh = None
+        errors = []
+        if USE_TASKS_API or mp_solutions_facemesh is None:
+            self._init_tasks_landmarker(errors)
+        if self.landmarker is None and mp_solutions_facemesh is not None:
+            self._init_legacy_face_mesh(errors)
+        if self.landmarker is None and self.face_mesh is None:
+            self.engine_error = " | ".join(errors) if errors else "MediaPipe engine unavailable"
+            print(f"[DrowsiGuard] MediaPipe failed to load: {self.engine_error}", flush=True)
 
         # OpenCV Haar Cascade fallback detectors
         self.face_cascade = None
@@ -154,6 +140,40 @@ class DrowsinessDetector:
         except Exception:
             self.face_cascade = None
             self.eye_cascade = None
+
+    def _init_tasks_landmarker(self, errors):
+        try:
+            from mediapipe.tasks.python import vision, BaseOptions
+            model_file = ensure_mediapipe_model_exists()
+            try:
+                base = BaseOptions(model_asset_path=str(model_file), delegate=BaseOptions.Delegate.CPU)
+            except Exception:
+                base = BaseOptions(model_asset_path=str(model_file))
+            options = vision.FaceLandmarkerOptions(
+                base_options=base,
+                running_mode=vision.RunningMode.IMAGE,
+                num_faces=1,
+                min_face_detection_confidence=0.3,
+                min_face_presence_confidence=0.3
+            )
+            self.landmarker = vision.FaceLandmarker.create_from_options(options)
+            self.use_tasks = True
+        except Exception as e:
+            self.landmarker = None
+            self.use_tasks = False
+            errors.append(f"tasks: {type(e).__name__}: {e}")
+
+    def _init_legacy_face_mesh(self, errors):
+        try:
+            self.face_mesh = mp_solutions_facemesh.FaceMesh(
+                max_num_faces=1,
+                refine_landmarks=True,
+                min_detection_confidence=0.5,
+                min_tracking_confidence=0.5
+            )
+        except Exception as e:
+            self.face_mesh = None
+            errors.append(f"solutions: {type(e).__name__}: {e}")
 
     def update_settings(self, ear_threshold, consec_frames, alarm_enabled):
         with self.lock:
@@ -190,6 +210,7 @@ class DrowsinessDetector:
         frame_rgb = np.ascontiguousarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB), dtype=np.uint8)
         
         try:
+            self._infer_lock.acquire()
             if self.use_tasks and self.landmarker is not None:
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
                 res = self.landmarker.detect(mp_image)
@@ -212,6 +233,11 @@ class DrowsinessDetector:
                         landmarks = results2.multi_face_landmarks[0]
         except Exception:
             landmarks = None
+        finally:
+            try:
+                self._infer_lock.release()
+            except RuntimeError:
+                pass
 
         # Stage 3 Fallback: Haar Cascade + MediaPipe cropped detection
         haar_face_box = None
