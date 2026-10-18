@@ -7,6 +7,8 @@ Main Application providing both:
 Full implementation of the Functional Requirement Specification (FRS).
 """
 
+import sys
+import glob
 import time
 import os
 import datetime
@@ -690,7 +692,11 @@ def render_live_monitoring():
         # Camera Mode Selector
         cam_source = st.radio("Camera Feed Source", ["🌐 WebRTC Browser Camera", "📹 Direct OpenCV Webcam"], horizontal=True)
         
-        if cam_source == "🌐 WebRTC Browser Camera":
+        # Cloud servers (Linux without /dev/video*) have no physical webcam: OpenCV mode then uses the browser camera
+        server_cam_possible = not (sys.platform.startswith("linux") and not glob.glob("/dev/video*"))
+        use_browser_cam = (cam_source == "🌐 WebRTC Browser Camera") or (not server_cam_possible)
+        
+        if use_browser_cam:
             from detector import DrowsinessVideoProcessor
             DrowsinessVideoProcessor.detector_ref = detector
             
@@ -814,26 +820,7 @@ def render_live_monitoring():
 
     _render_cards(detector)
 
-    def _run_browser_camera_fallback():
-        """Server has no physical webcam (cloud deploy): process the browser camera with the same OpenCV pipeline."""
-        from detector import DrowsinessVideoProcessor
-        DrowsinessVideoProcessor.detector_ref = detector
-        with frame_placeholder.container():
-            fb_ctx = webrtc_streamer(
-                key="drowsiguard-opencv-browser-fallback",
-                mode=WebRtcMode.SENDRECV,
-                rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
-                video_processor_factory=DrowsinessVideoProcessor,
-                media_stream_constraints={"video": True, "audio": False},
-                async_processing=True,
-            )
-        while fb_ctx and fb_ctx.state.playing:
-            if fb_ctx.video_processor is not None:
-                fb_ctx.video_processor.detector = detector
-            _render_cards(detector)
-            time.sleep(0.25)
-
-    if cam_source == "🌐 WebRTC Browser Camera":
+    if use_browser_cam:
         if webrtc_ctx and webrtc_ctx.state.playing:
             while webrtc_ctx.state.playing:
                 if webrtc_ctx.video_processor is not None:
@@ -846,12 +833,8 @@ def render_live_monitoring():
             st.session_state.opencv_streaming = False
         if start_btn:
             st.session_state.opencv_streaming = True
-            st.session_state.opencv_browser_fallback = False
         if stop_btn:
             st.session_state.opencv_streaming = False
-            st.session_state.opencv_browser_fallback = False
-        if st.session_state.get("opencv_browser_fallback", False) and not st.session_state.opencv_streaming:
-            _run_browser_camera_fallback()
 
         if st.session_state.opencv_streaming:
             frame_placeholder.info("⏳ Initializing hardware webcam...")
@@ -894,9 +877,7 @@ def render_live_monitoring():
                         frame_idx += 1
                         time.sleep(0.02)
                 else:
-                    st.session_state.opencv_streaming = False
-                    st.session_state.opencv_browser_fallback = True
-                    _run_browser_camera_fallback()
+                    frame_placeholder.error("❌ Hardware Camera (OpenCV) could not be opened.\n\n**Quick Solution:** On Windows, only one application can access the webcam at a time. If you were using 'WebRTC Browser Camera', click **'Stop'** on WebRTC or refresh the browser page (press F5), then click 'Start Live OpenCV Stream'.")
                     st.session_state.opencv_streaming = False
             except Exception as cam_err:
                 frame_placeholder.error(f"❌ Camera stream error: {cam_err}")
