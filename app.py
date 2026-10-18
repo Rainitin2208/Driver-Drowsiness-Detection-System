@@ -17,6 +17,7 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 
@@ -714,6 +715,8 @@ def render_live_monitoring():
 
         st.markdown("<br>", unsafe_allow_html=True)
         fatigue_placeholder = st.empty()
+        alarm_placeholder = st.empty()
+        alarm_state = {"playing": False}
 
     with col_right:
         status_placeholder = st.empty()
@@ -740,9 +743,27 @@ def render_live_monitoring():
             unsafe_allow_html=True
         )
 
+    def _sync_browser_alarm(det):
+        """Play the alarm beep in the user's browser (server-side pygame cannot play sound on cloud)."""
+        should_play = bool(det.is_drowsy and det.alarm_enabled and not det.muted_chime)
+        if should_play and not alarm_state["playing"]:
+            b64 = get_html_audio_b64()
+            if b64:
+                with alarm_placeholder.container():
+                    components.html(
+                        f'<audio autoplay loop><source src="data:audio/wav;base64,{b64}" type="audio/wav"></audio>'
+                        '<script>var a=document.querySelector("audio");if(a){a.volume=1.0;var p=a.play();if(p&&p.catch){p.catch(function(){});}}</script>',
+                        height=0,
+                    )
+                alarm_state["playing"] = True
+        elif not should_play and alarm_state["playing"]:
+            alarm_placeholder.empty()
+            alarm_state["playing"] = False
+
     def _render_cards(det=None):
         if det is None:
             det = detector
+        _sync_browser_alarm(det)
         status_class = "status-alert" if not det.is_drowsy else "status-drowsy"
         status_text = "ALERT" if not det.is_drowsy else "DROWSY"
         status_placeholder.markdown(
@@ -798,7 +819,6 @@ def render_live_monitoring():
         from detector import DrowsinessVideoProcessor
         DrowsinessVideoProcessor.detector_ref = detector
         with frame_placeholder.container():
-            st.info("ℹ️ Server par physical webcam nahi hai (cloud deployment), isliye aapke browser ka camera same OpenCV detection ke saath use ho raha hai. Neeche 'START' dabaiye.")
             fb_ctx = webrtc_streamer(
                 key="drowsiguard-opencv-browser-fallback",
                 mode=WebRtcMode.SENDRECV,
